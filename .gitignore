@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+# model weights & experiment artifacts (keep code+configs in git, big files on NAS)
+models/**/weights.pt
+# keep outputs/ in the work dir for access; track RESULTS.md + figures, ignore bulky raw runs
+outputs/**/runs/
+outputs/**/*.npz
+wandb/
+outputs/

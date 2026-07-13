@@ -1,4 +1,5 @@
 _target_: jepa.JEPA
+history_size: ${history_size}
 
 encoder:
   _target_: stable_pretraining.backbone.utils.vit_hf

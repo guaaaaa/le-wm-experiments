@@ -1,13 +1,9 @@
 dataset:
   num_steps: ${eval:'${num_preds} + ${history_size}'}
-  frameskip: 5
-  name: pusht_expert_train.h5
+  frameskip: 4
+  name: memory_maze9_train.h5
   keys_to_load:
     - pixels
     - action
-    - proprio
-    - state
   keys_to_cache:
     - action
-    - proprio
-    - state

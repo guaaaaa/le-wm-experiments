@@ -17,6 +17,7 @@ class JEPA(nn.Module):
         action_encoder,
         projector=None,
         pred_proj=None,
+        history_size=3,
     ):
         super().__init__()
 
@@ -25,6 +26,10 @@ class JEPA(nn.Module):
         self.action_encoder = action_encoder
         self.projector = projector or nn.Identity()
         self.pred_proj = pred_proj or nn.Identity()
+        # Context window for inference rollout; must equal the predictor's
+        # num_frames (pos-embedding rows). Older pickled checkpoints lack the
+        # attribute -> read via getattr(self, "history_size", 3).
+        self.history_size = history_size
 
     def encode(self, info):
         """Encode observations and actions into embeddings.
@@ -58,13 +63,18 @@ class JEPA(nn.Module):
     ## Inference only ##
     ####################
 
-    def rollout(self, info, action_sequence, history_size: int = 3):
+    def rollout(self, info, action_sequence, history_size=None):
         """Rollout the model given an initial info dict and action sequence.
         pixels: (B, S, T, C, H, W)
         action_sequence: (B, S, T, action_dim)
          - S is the number of action plan samples
          - T is the time horizon
+        history_size: context window; defaults to the model's own history_size
+        (pos-embedding rows) so retrained longer-context models are not
+        silently truncated to 3.
         """
+        if history_size is None:
+            history_size = getattr(self, "history_size", 3)
 
         assert "pixels" in info, "pixels not in info_dict"
         H = info["pixels"].size(2)

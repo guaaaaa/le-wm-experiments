@@ -2,6 +2,8 @@ import os
 
 os.environ["MUJOCO_GL"] = "egl"
 
+import json
+import logging
 import time
 from pathlib import Path
 
@@ -49,9 +51,19 @@ def get_dataset(cfg, dataset_name):
 @hydra.main(version_base=None, config_path="./config/eval", config_name="pusht")
 def run(cfg: DictConfig):
     """Run evaluation of dinowm vs random policy."""
-    assert (
-        cfg.plan_config.horizon * cfg.plan_config.action_block <= cfg.eval.eval_budget
-    ), "Planning horizon must be smaller than or equal to eval_budget"
+    _plan_env_steps = cfg.plan_config.horizon * cfg.plan_config.action_block
+    if _plan_env_steps > cfg.eval.eval_budget:
+        _msg = (
+            f"Planning horizon ({cfg.plan_config.horizon} action-blocks x "
+            f"{cfg.plan_config.action_block} = {_plan_env_steps} env steps) exceeds "
+            f"eval_budget ({cfg.eval.eval_budget})."
+        )
+        if cfg.get("allow_long_horizon", False):
+            logging.warning(
+                "%s Proceeding: planner optimizes past what it executes.", _msg
+            )
+        else:
+            raise AssertionError(_msg + " Set allow_long_horizon=true to allow.")
 
     # create world environment
     cfg.world.max_episode_steps = 2 * cfg.eval.eval_budget
@@ -86,7 +98,7 @@ def run(cfg: DictConfig):
 
     if policy != "random":
         model = swm.wm.utils.load_pretrained(cfg.policy)
-        model = model.to("cuda")
+        model = model.to(cfg.get("model_device", "cuda"))
         model = model.eval()
         model.requires_grad_(False)
         model.interpolate_pos_encoding = True
@@ -99,11 +111,12 @@ def run(cfg: DictConfig):
     else:
         policy = swm.policy.RandomPolicy()
 
-    results_path = (
-        Path(swm.data.utils.get_cache_dir(), cfg.policy).parent
-        if cfg.policy != "random"
-        else Path(__file__).parent
-    )
+    if cfg.get("output_dir"):
+        results_path = Path(cfg.output_dir)
+    elif cfg.policy != "random":
+        results_path = Path(swm.data.utils.get_cache_dir(), cfg.policy).parent
+    else:
+        results_path = Path(__file__).parent
 
     # sample the episodes and the starting indices
     episode_len = get_episodes_length(dataset, ep_indices)
@@ -153,6 +166,30 @@ def run(cfg: DictConfig):
     end_time = time.time()
     
     print(metrics)
+
+    # machine-readable results for pairing/aggregation across sweep conditions
+    def _jsonable(v):
+        if isinstance(v, np.ndarray):
+            return v.tolist()
+        if isinstance(v, np.generic):
+            return v.item()
+        return v
+
+    run_json = {
+        "success_rate": _jsonable(metrics.get("success_rate")),
+        "episode_successes": _jsonable(metrics.get("episode_successes")),
+        "seeds": _jsonable(metrics.get("seeds")),
+        "episodes": eval_episodes.tolist(),
+        "start_steps": eval_start_idx.tolist(),
+        "seed": int(cfg.seed),
+        "num_eval": int(cfg.eval.num_eval),
+        "plan_config": OmegaConf.to_container(cfg.plan_config, resolve=True),
+        "eval_budget": int(cfg.eval.eval_budget),
+        "goal_offset_steps": int(cfg.eval.goal_offset_steps),
+        "evaluation_time_s": float(end_time - start_time),
+    }
+    with (results_path / "results.json").open("w") as jf:
+        json.dump(run_json, jf, indent=2)
 
     results_path = results_path / cfg.output.filename
     results_path.parent.mkdir(parents=True, exist_ok=True)

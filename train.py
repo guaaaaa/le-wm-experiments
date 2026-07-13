@@ -62,6 +62,10 @@ def run(cfg):
         for col in cfg.data.dataset.keys_to_load:
             if col.startswith("pixels"):
                 continue
+            # one-hot / discrete actions must NOT be z-scored (destroys the one-hot
+            # structure; a never-used action index has std=0 -> NaN, no eps clamp)
+            if col == "action" and not cfg.get("normalize_action", True):
+                continue
             normalizer = get_column_normalizer(dataset, col, col)
             transforms.append(normalizer)
 
@@ -108,10 +112,13 @@ def run(cfg):
     run_id = cfg.get("subdir") or ""
     run_dir = Path(swm.data.utils.get_cache_dir(sub_folder='checkpoints'), run_id)
 
-    logger = None
     if cfg.wandb.enabled:
         logger = WandbLogger(**cfg.wandb.config)
         logger.log_hyperparams(OmegaConf.to_container(cfg))
+    else:
+        # keep loss curves even without wandb (metrics.csv under the run dir)
+        from lightning.pytorch.loggers import CSVLogger
+        logger = CSVLogger(save_dir=str(run_dir), name="csv_logs")
 
     run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / "config.yaml", "w") as f:
